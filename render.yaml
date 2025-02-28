@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: knowledge-management-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: knowledge-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: https://your-frontend-domain.vercel.app
+
+databases:
+  - name: knowledge-db
+    databaseName: knowledge_db
+    user: knowledge_user
+    plan: free
