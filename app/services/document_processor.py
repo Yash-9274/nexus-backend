@@ -4,19 +4,25 @@ from docx import Document as DocxDocument
 import markdown
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from app.core.config import settings
-import openai
+import cohere
 import json
 from collections import Counter
 import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from nltk.tag import pos_tag
+from nltk.chunk import ne_chunk
 import logging
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 # Download required NLTK data at startup
 import nltk
+
+# Initialize Cohere client
+co = cohere.Client(api_key=settings.COHERE_API_KEY)
+
+logger = logging.getLogger(__name__)
 
 def download_nltk_data():
     print("Downloading NLTK data...")
@@ -27,8 +33,6 @@ def download_nltk_data():
     nltk.download('words')
 
 download_nltk_data()
-
-logger = logging.getLogger(__name__)
 
 class DocumentProcessor:
     def __init__(self):
@@ -77,35 +81,26 @@ class DocumentProcessor:
 
     async def analyze_document(self, text: str) -> Dict:
         try:
-            # Check if OpenAI API key is configured
-            if not settings.OPENAI_API_KEY:
-                logger.warning("OpenAI API key not configured, falling back to basic analysis")
-                return self.basic_analysis(text)
-
-            # Split text into chunks for longer documents
             chunks = self.text_splitter.split_text(text)
             first_chunk = chunks[0] if chunks else text[:4000]
             
             try:
-                # Get AI analysis from OpenAI
-                response = await openai.ChatCompletion.create(
-                    model="gpt-3.5-turbo",
-                    messages=[{
-                        "role": "system",
-                        "content": "You are an expert document analyzer. Extract key information in a structured JSON format."
-                    }, {
-                        "role": "user",
-                        "content": f"""Analyze this text and provide the following in JSON format:
-                        1) summary: A concise 2-3 sentence summary
-                        2) keywords: Array of 5-10 most important keywords
-                        3) entities: Array of named entities (people, organizations, locations)
-                        4) category: The document category/type
+                response = co.generate(
+                    model='command',
+                    prompt=f"""Analyze this text and provide the following in JSON format:
+                    1) summary: A concise 2-3 sentence summary
+                    2) keywords: Array of 5-10 most important keywords
+                    3) entities: Array of named entities (people, organizations, locations)
+                    4) category: The document category/type
 
-                        Text: {first_chunk}"""
-                    }]
+                    Text: {first_chunk}
+
+                    Output in JSON format only.""",
+                    max_tokens=500,
+                    temperature=0.3,
                 )
                 
-                ai_analysis = json.loads(response.choices[0].message.content)
+                ai_analysis = json.loads(response.generations[0].text)
                 embedding = self.create_embeddings(text)
 
                 return {
@@ -116,8 +111,8 @@ class DocumentProcessor:
                     "embedding": embedding
                 }
 
-            except (openai.error.AuthenticationError, openai.error.RateLimitError) as e:
-                logger.warning(f"OpenAI API error: {str(e)}, falling back to basic analysis")
+            except Exception as e:
+                logger.error(f"Cohere API error: {str(e)}")
                 return self.basic_analysis(text)
             
         except Exception as e:
