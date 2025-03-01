@@ -4,6 +4,7 @@ from app.core.config import settings
 from app.api import auth, documents
 from app.core.init_nltk import download_nltk_data
 import os
+import uvicorn
 
 # Download NLTK data before starting the app
 download_nltk_data()
@@ -15,7 +16,6 @@ app = FastAPI(
 allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 
 # Configure CORS
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
@@ -32,6 +32,5 @@ async def health_check():
     return {"status": "healthy"}
 
 if __name__ == "__main__":
-    import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
