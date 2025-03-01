@@ -12,6 +12,8 @@ from app.db.database import Base
 from app.models.user import User
 from app.models.document import Document
 
+import re
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
@@ -21,8 +23,19 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Override the sqlalchemy.url in alembic.ini with the one from settings
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# Simple regex-based URL encoding for the password only
+db_url = settings.DATABASE_URL
+if '@' in db_url:
+    # Extract password portion and encode it
+    pattern = r'postgres://([^:]+):([^@]+)@(.+)'
+    match = re.match(pattern, db_url)
+    if match:
+        username, password, rest = match.groups()
+        encoded_password = re.sub(r'[^\w\-\.]', lambda m: f'%{ord(m.group(0)):02X}', password)
+        db_url = f'postgres://{username}:{encoded_password}@{rest}'
+
+# Escape % for configparser
+config.set_main_option("sqlalchemy.url", db_url.replace('%', '%%'))
 
 # add your model's MetaData object here
 # for 'autogenerate' support
@@ -66,15 +79,18 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    configuration = config.get_section(config.config_ini_section)
+    configuration["sqlalchemy.url"] = db_url
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata
         )
 
         with context.begin_transaction():

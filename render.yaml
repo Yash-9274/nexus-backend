@@ -12,7 +12,7 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: ALLOWED_ORIGINS
-        value: https://your-frontend-domain.vercel.app
+        value: http://localhost:3000,https://your-app-name.vercel.app
 
 databases:
   - name: knowledge-db

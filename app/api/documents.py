@@ -18,6 +18,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.types import String
+from io import BytesIO  # Add this import
+from storage.storage import S3StorageProvider  # Add this import if missing
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -35,24 +37,25 @@ async def upload_document(
         if ext not in settings.ALLOWED_EXTENSIONS:
             raise HTTPException(status_code=400, detail="File type not supported")
 
-        # Process file content
+        # Read file content
+        file_content = await file.read()
+        
+        # Process content
         content = ""
         if ext == "pdf":
-            content = document_processor.process_pdf(file.file)
+            content = document_processor.process_pdf(BytesIO(file_content))
         elif ext == "docx":
-            content = document_processor.process_docx(file.file)
+            content = document_processor.process_docx(BytesIO(file_content))
         elif ext == "md":
-            content = document_processor.process_markdown(await file.read())
+            content = document_processor.process_markdown(file_content.decode())
 
         # Analyze document content
         analysis = await document_processor.analyze_document(content)
 
-        # Save file
-        file_path = f"{settings.DOCUMENT_STORAGE_PATH}/{uuid.uuid4()}.{ext}"
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
-        with open(file_path, "wb") as f:
-            file.file.seek(0)
-            f.write(await file.read())
+             # Upload to S3
+        storage = S3StorageProvider()
+        filename = f"{uuid.uuid4()}.{ext}"
+        file_path = await storage.upload_file(file_content, filename)
 
         # Create document record
         document = Document(
@@ -75,11 +78,12 @@ async def upload_document(
         return document
 
     except Exception as e:
+        logger.error(f"Upload error: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=str(e)
         )
-
+    
 @router.get("")
 async def get_documents(
     db: Session = Depends(get_db),
@@ -90,7 +94,6 @@ async def get_documents(
     ).order_by(Document.created_at.desc()).all()
     
     return documents 
-
 
 @router.get("/{document_id}/content")
 async def get_document_content(
@@ -106,23 +109,14 @@ async def get_document_content(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    if not os.path.exists(document.file_path):
-        raise HTTPException(status_code=404, detail="Document file not found")
-    
-    headers = {
-        "Content-Disposition": f'inline; filename="{document.title}"',
-        "Access-Control-Allow-Origin": "http://localhost:3000",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
-        "Access-Control-Allow-Headers": "*",
-        "Access-Control-Allow-Credentials": "true"
-    }
-    
-    return FileResponse(
-        path=document.file_path,
-        media_type=f"application/{document.file_type}",
-        filename=document.title,
-        headers=headers
-    )
+    storage = S3StorageProvider()
+    try:
+        file_url = await storage.get_file_url(document.file_path)
+        return {"url": file_url}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error accessing file")
+
+
 
 @router.delete("/{document_id}")
 async def delete_document(
