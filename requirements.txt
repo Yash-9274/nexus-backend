@@ -20,3 +20,4 @@ nltk
 scikit-learn
 openai
 cohere
+langchain
