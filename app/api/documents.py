@@ -283,3 +283,29 @@ async def get_document_graph(
             status_code=500,
             detail="Error generating knowledge graph"
         )
+
+@router.get("/{document_id}/metadata")
+async def get_document_metadata(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        document = db.query(Document).filter(
+            Document.id == document_id,
+            Document.user_id == current_user.id
+        ).first()
+        
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        return {
+            "metadata_col": document.metadata_col
+        }
+
+    except Exception as e:
+        logger.error(f"Error retrieving document metadata: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving document metadata: {str(e)}"
+        )
