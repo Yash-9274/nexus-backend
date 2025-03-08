@@ -11,6 +11,7 @@ from app.db.database import Base
 
 from app.models.user import User
 from app.models.document import Document
+from app.models.share_access import ShareAccess
 
 import re
 
