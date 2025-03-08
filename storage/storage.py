@@ -4,6 +4,7 @@ from botocore.exceptions import ClientError
 from app.core.config import settings
 import logging
 from typing import BinaryIO
+from botocore.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,11 @@ class S3StorageProvider(StorageProvider):
             's3',
             aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
             aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-            region_name=settings.AWS_REGION
+            region_name=settings.AWS_REGION,
+            config=Config(
+                region_name=settings.AWS_REGION,
+                signature_version='s3v4'
+            )
         )
         self.bucket = settings.AWS_BUCKET_NAME
 
@@ -48,8 +53,11 @@ class S3StorageProvider(StorageProvider):
         try:
             url = self.s3.generate_presigned_url(
                 'get_object',
-                Params={'Bucket': self.bucket, 'Key': file_path},
-                ExpiresIn=3600
+                Params={
+                    'Bucket': self.bucket,
+                    'Key': file_path,
+                },
+                ExpiresIn=3600,
             )
             return url
         except Exception as e:
