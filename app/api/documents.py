@@ -95,56 +95,6 @@ async def get_documents(
     
     return documents 
 
-@router.get("/{document_id}/content")
-async def get_document_content(
-    document_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    document = db.query(Document).filter(
-        Document.id == document_id,
-        Document.user_id == current_user.id
-    ).first()
-    
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    storage = S3StorageProvider()
-    try:
-        file_url = await storage.get_file_url(document.file_path)
-        return {"url": file_url}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Error accessing file")
-
-
-
-@router.delete("/{document_id}")
-async def delete_document(
-    document_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    document = db.query(Document).filter(
-        Document.id == document_id,
-        Document.user_id == current_user.id
-    ).first()
-    
-    if not document:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    # Delete the physical file
-    try:
-        if os.path.exists(document.file_path):
-            os.remove(document.file_path)
-    except Exception as e:
-        logger.error(f"Error deleting file: {e}")
-        
-    # Delete from database
-    db.delete(document)
-    db.commit()
-    
-    return {"message": "Document deleted successfully"}
-
 @router.get("/search")
 async def search_documents(
     q: str,
@@ -225,3 +175,111 @@ async def search_documents(
             })
     
     return unique_results[:10]  # Return top 10 results
+
+@router.get("/{document_id}")
+async def get_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id
+    ).first()
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    storage = S3StorageProvider()
+    try:
+        file_url = await storage.get_file_url(document.file_path)
+        return {
+            "metadata": document,
+            "url": file_url
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Error accessing file")
+
+@router.delete("/{document_id}")
+async def delete_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    document = db.query(Document).filter(
+        Document.id == document_id,
+        Document.user_id == current_user.id
+    ).first()
+    
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    # Delete from S3
+    storage = S3StorageProvider()
+    try:
+        success = await storage.delete_file(document.file_path)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete file from storage")
+    except Exception as e:
+        logger.error(f"Error deleting file from S3: {e}")
+        raise HTTPException(status_code=500, detail="Error deleting file from storage")
+        
+    # Delete from database
+    db.delete(document)
+    db.commit()
+    
+    return {"message": "Document deleted successfully"}
+
+@router.get("/graph")
+async def get_document_graph(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        documents = db.query(Document).filter(Document.user_id == current_user.id).all()
+        
+        nodes = []
+        links = []
+        seen_keywords = set()
+        
+        # Create graph data
+        for doc in documents:
+            doc_id = str(doc.id)
+            nodes.append({
+                "id": doc_id,
+                "name": doc.title,
+                "category": "document",
+                "val": 1,
+                "color": "#ff4444"
+            })
+            
+            # Add keyword nodes and links
+            if doc.metadata_col and "keywords" in doc.metadata_col:
+                for keyword in doc.metadata_col["keywords"]:
+                    keyword_id = f"keyword-{keyword}"
+                    if keyword_id not in seen_keywords:
+                        nodes.append({
+                            "id": keyword_id,
+                            "name": keyword,
+                            "category": "keyword",
+                            "val": 0.5,
+                            "color": "#4444ff"
+                        })
+                        seen_keywords.add(keyword_id)
+                    
+                    links.append({
+                        "source": doc_id,
+                        "target": keyword_id,
+                        "strength": 1
+                    })
+        
+        return {
+            "nodes": nodes,
+            "links": links
+        }
+    except Exception as e:
+        logger.error(f"Error generating knowledge graph: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error generating knowledge graph"
+        )
