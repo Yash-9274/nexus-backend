@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     # Update storage settings
     STORAGE_PROVIDER: str = "S3"
 
+    # Email Settings
+    MAIL_USERNAME: str | None = None
+    MAIL_PASSWORD: str | None = None
+    MAIL_FROM: str | None = None
+    MAIL_PORT: int | None = None
+    MAIL_SERVER: str | None = None
+    MAIL_SSL_TLS: bool = True
+
     class Config:
         env_file = ".env"
 

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.services.document_processor import DocumentProcessor
@@ -20,6 +20,8 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.types import String
 from io import BytesIO  # Add this import
 from storage.storage import S3StorageProvider  # Add this import if missing
+from app.models.share_access import ShareAccess, AccessLevel
+from app.services.email import EmailService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -309,3 +311,73 @@ async def get_document_metadata(
             status_code=500,
             detail=f"Error retrieving document metadata: {str(e)}"
         )
+
+@router.post("/share")
+def share_document(
+    data: dict,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        document = db.query(Document).filter(
+            Document.id == data["documentId"],
+            Document.user_id == current_user.id
+        ).first()
+        
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        # Check if already shared with this email
+        existing_share = db.query(ShareAccess).filter(
+            ShareAccess.document_id == document.id,
+            ShareAccess.shared_with_email == data["email"]
+        ).first()
+
+        if existing_share:
+            raise HTTPException(
+                status_code=400,
+                detail="Document already shared with this email"
+            )
+
+        share_access = ShareAccess(
+            document_id=document.id,
+            shared_by_id=current_user.id,
+            shared_with_email=data["email"],
+            access_level=AccessLevel.VIEW
+        )
+        
+        db.add(share_access)
+        db.commit()
+        db.refresh(share_access)
+
+        # Send email notification
+        email_service = EmailService()
+        email_sent = email_service.send_share_notification(
+            recipient_email=data["email"],
+            document_title=document.title,
+            shared_by_name=current_user.name
+        )
+        
+        return {
+            "message": "Document shared successfully",
+            "email_sent": email_sent
+        }
+
+    except Exception as e:
+        logger.error(f"Error sharing document: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error sharing document"
+        )
+
+@router.get("/shared-with-me")
+async def get_shared_documents(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    shared_docs = db.query(Document).join(ShareAccess).filter(
+        ShareAccess.shared_with_email == current_user.email
+    ).all()
+    
+    return shared_docs
