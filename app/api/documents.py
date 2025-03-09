@@ -381,3 +381,44 @@ async def get_shared_documents(
     ).all()
     
     return shared_docs
+
+@router.post("/{document_id}/apply-template")
+async def apply_template(
+    document_id: int,
+    template_data: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        document = db.query(Document).filter(
+            Document.id == document_id,
+            Document.user_id == current_user.id
+        ).first()
+        
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        template_id = template_data.get("templateId")
+        if not template_id:
+            raise HTTPException(status_code=400, detail="Template ID is required")
+
+        # Apply template to document content
+        new_content = await document_processor.apply_template(
+            document.content,
+            template_id
+        )
+        
+        # Update document with new content
+        document.content = new_content
+        db.commit()
+        
+        return {"message": "Template applied successfully"}
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error applying template: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error applying template"
+        )
