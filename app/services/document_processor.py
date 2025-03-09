@@ -46,6 +46,20 @@ class DocumentProcessor:
             max_features=512,
             stop_words='english'
         )
+        
+        # Import templates
+        from app.templates.academic_template import ACADEMIC_TEMPLATE
+        from app.templates.business_template import BUSINESS_TEMPLATE
+        # from app.templates.technical_template import TECHNICAL_TEMPLATE
+        # from app.templates.letter_template import LETTER_TEMPLATE
+        
+        # Initialize templates dictionary
+        self.templates = {
+            'academic': ACADEMIC_TEMPLATE,
+            'business': BUSINESS_TEMPLATE,
+            # 'technical': TECHNICAL_TEMPLATE,
+            # 'letter': LETTER_TEMPLATE
+        }
 
     def process_pdf(self, file: BinaryIO) -> str:
         pdf_reader = PyPDF2.PdfReader(file)
@@ -163,4 +177,84 @@ class DocumentProcessor:
             if hasattr(chunk, 'label'):
                 named_entities.append(' '.join(c[0] for c in chunk))
         
-        return list(set(named_entities))[:10]  # Return up to 10 unique entities 
+        return list(set(named_entities))[:10]  # Return up to 10 unique entities
+
+    async def apply_template(self, content: str, template_id: str) -> str:
+        template = self.templates.get(template_id)
+        if not template:
+            raise ValueError(f"Template '{template_id}' not found")
+
+        try:
+            # Split content into smaller chunks
+            chunks = self.text_splitter.split_text(content)
+            first_chunk = chunks[0] if chunks else content[:2000]
+
+            prompt = f"""You are a document formatter. Format this document into the following sections: {', '.join(template['structure'])}
+
+            Rules:
+            1. Extract and organize content into appropriate sections
+            2. Keep the original content's meaning
+            3. Ensure each section has relevant content
+            4. Use exactly this format for each section:
+            SECTION: [section name]
+            CONTENT:
+            [section content]
+            END
+
+            Document to format:
+            {first_chunk}
+            """
+
+            response = co.generate(
+                model='command',
+                prompt=prompt,
+                max_tokens=2000,
+                temperature=0.1,
+            )
+
+            # Parse sections
+            sections = {}
+            current_section = None
+            current_content = []
+            
+            for line in response.generations[0].text.split('\n'):
+                line = line.strip()
+                if line.startswith('SECTION:'):
+                    if current_section and current_content:
+                        sections[current_section] = '\n'.join(current_content).strip()
+                    current_section = line.replace('SECTION:', '').strip().lower()
+                    current_content = []
+                elif line.startswith('CONTENT:'):
+                    continue
+                elif line == 'END':
+                    if current_section and current_content:
+                        sections[current_section] = '\n'.join(current_content).strip()
+                    current_section = None
+                    current_content = []
+                elif current_section and line:
+                    current_content.append(line)
+
+            # Add remaining content to sections
+            remaining_text = ' '.join(chunks[1:]) if len(chunks) > 1 else ''
+            
+            # Ensure all template sections exist
+            for section in template['structure']:
+                if section not in sections:
+                    if remaining_text:
+                        section_text = remaining_text[:1000]
+                        remaining_text = remaining_text[1000:]
+                        sections[section] = section_text.strip()
+                    else:
+                        sections[section] = f"[{section} content will be added here]"
+
+            # Format according to template
+            formatted_content = template['format'].format(**sections)
+            
+            # Clean up any extra whitespace
+            formatted_content = '\n'.join(line.strip() for line in formatted_content.splitlines() if line.strip())
+            
+            return formatted_content
+
+        except Exception as e:
+            logger.error(f"Error in template application: {str(e)}")
+            return content  # Return original content on error 
