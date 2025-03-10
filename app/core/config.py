@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     MAIL_SERVER: str | None = None
     MAIL_SSL_TLS: bool = True
 
+    # Database connection settings
+    DATABASE_POOL_SIZE: int = 20
+    DATABASE_MAX_OVERFLOW: int = 10
+    DATABASE_POOL_TIMEOUT: int = 30
+    DATABASE_POOL_RECYCLE: int = 1800
+
     class Config:
         env_file = ".env"
 

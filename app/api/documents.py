@@ -22,6 +22,8 @@ from io import BytesIO  # Add this import
 from storage.storage import S3StorageProvider  # Add this import if missing
 from app.models.share_access import ShareAccess, AccessLevel
 from app.services.email import EmailService
+from sqlalchemy.exc import OperationalError
+import time
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -390,15 +392,31 @@ async def apply_template(
     current_user: User = Depends(get_current_user)
 ):
     try:
-        document = db.query(Document).filter(
-            Document.id == document_id,
-            Document.user_id == current_user.id
-        ).first()
+        # Get document with retry logic
+        retries = 3
+        retry_delay = 1
+        document = None
+        
+        for attempt in range(retries):
+            try:
+                document = db.query(Document).filter(
+                    Document.id == document_id,
+                    Document.user_id == current_user.id
+                ).first()
+                break
+            except OperationalError as e:
+                if attempt == retries - 1:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Database connection error, please try again later"
+                    )
+                time.sleep(retry_delay)
+                db = next(get_db())
         
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
 
-        template_id = template_data.get("templateId")
+        template_id = template_data.get("templateId")  # Get templateId from request data
         if not template_id:
             raise HTTPException(status_code=400, detail="Template ID is required")
 
@@ -408,11 +426,26 @@ async def apply_template(
             template_id
         )
         
-        # Update document with new content
-        document.content = new_content
-        db.commit()
+        # Update document with retry logic
+        for attempt in range(retries):
+            try:
+                document.content = new_content
+                document.metadata_col["formatted"] = True  # Add flag to indicate formatted content
+                db.commit()
+                break
+            except OperationalError as e:
+                if attempt == retries - 1:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Failed to save changes, please try again later"
+                    )
+                time.sleep(retry_delay)
+                db = next(get_db())
         
-        return {"message": "Template applied successfully"}
+        return {
+            "message": "Template applied successfully",
+            "content": new_content  # Return the formatted content
+        }
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

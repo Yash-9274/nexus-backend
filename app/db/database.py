@@ -3,6 +3,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 from sqlalchemy.pool import QueuePool
+from sqlalchemy.exc import OperationalError
+import time
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,11 +18,11 @@ try:
     engine = create_engine(
         db_url,
         poolclass=QueuePool,
-        pool_size=5,
-        max_overflow=10,
-        pool_timeout=30,
+        pool_size=settings.DATABASE_POOL_SIZE,
+        max_overflow=settings.DATABASE_MAX_OVERFLOW,
+        pool_timeout=settings.DATABASE_POOL_TIMEOUT,
         pool_pre_ping=True,
-        pool_recycle=1800,
+        pool_recycle=settings.DATABASE_POOL_RECYCLE,
         connect_args={
             "sslmode": "require",
             "connect_timeout": 60
@@ -41,7 +43,18 @@ Base = declarative_base()
 
 def get_db():
     db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    retries = 3
+    retry_delay = 1
+    
+    for attempt in range(retries):
+        try:
+            yield db
+            break
+        except OperationalError as e:
+            if attempt == retries - 1:
+                logger.error(f"Database connection failed after {retries} attempts")
+                raise
+            logger.warning(f"Database connection attempt {attempt + 1} failed, retrying...")
+            time.sleep(retry_delay)
+        finally:
+            db.close()
