@@ -189,19 +189,24 @@ class DocumentProcessor:
             chunks = self.text_splitter.split_text(content)
             first_chunk = chunks[0] if chunks else content[:2000]
 
-            prompt = f"""You are a document formatter. Format this document into the following sections: {', '.join(template['structure'])}
+            prompt = f"""Analyze and reorganize this document into a structured format.
 
-            Rules:
-            1. Extract and organize content into appropriate sections
-            2. Keep the original content's meaning
-            3. Ensure each section has relevant content
-            4. Use exactly this format for each section:
-            SECTION: [section name]
-            CONTENT:
-            [section content]
-            END
+            Required sections: {', '.join(template['structure'])}
 
-            Document to format:
+            Instructions:
+            1. Extract relevant content for each section
+            2. If a section's content isn't found, write a placeholder
+            3. Format MUST follow this structure exactly:
+
+            <BEGIN>
+            [SECTION]title[/SECTION]
+            [CONTENT]Document title here[/CONTENT]
+
+            [SECTION]next_section[/SECTION]
+            [CONTENT]Content for this section[/CONTENT]
+            <END>
+
+            Here's the document:
             {first_chunk}
             """
 
@@ -210,51 +215,64 @@ class DocumentProcessor:
                 prompt=prompt,
                 max_tokens=2000,
                 temperature=0.1,
+                stop_sequences=["<END>"]
             )
 
-            # Parse sections
+            # Parse sections using regex
+            import re
             sections = {}
-            current_section = None
-            current_content = []
+            pattern = r'\[SECTION\](.*?)\[/SECTION\]\s*\[CONTENT\](.*?)\[/CONTENT\]'
+            matches = re.findall(pattern, response.generations[0].text, re.DOTALL)
             
-            for line in response.generations[0].text.split('\n'):
-                line = line.strip()
-                if line.startswith('SECTION:'):
-                    if current_section and current_content:
-                        sections[current_section] = '\n'.join(current_content).strip()
-                    current_section = line.replace('SECTION:', '').strip().lower()
-                    current_content = []
-                elif line.startswith('CONTENT:'):
-                    continue
-                elif line == 'END':
-                    if current_section and current_content:
-                        sections[current_section] = '\n'.join(current_content).strip()
-                    current_section = None
-                    current_content = []
-                elif current_section and line:
-                    current_content.append(line)
+            for section_name, content in matches:
+                sections[section_name.strip().lower()] = content.strip()
 
-            # Add remaining content to sections
+            # Process remaining chunks for missing sections
             remaining_text = ' '.join(chunks[1:]) if len(chunks) > 1 else ''
             
-            # Ensure all template sections exist
+            # Ensure all template sections exist with meaningful content
             for section in template['structure']:
-                if section not in sections:
+                if section not in sections or not sections[section].strip():
                     if remaining_text:
-                        section_text = remaining_text[:1000]
+                        # Extract relevant content for this section from remaining text
+                        section_prompt = f"Extract content relevant to the '{section}' section from this text: {remaining_text[:1000]}"
+                        section_response = co.generate(
+                            model='command',
+                            prompt=section_prompt,
+                            max_tokens=500,
+                            temperature=0.1
+                        )
+                        sections[section] = section_response.generations[0].text.strip()
                         remaining_text = remaining_text[1000:]
-                        sections[section] = section_text.strip()
                     else:
-                        sections[section] = f"[{section} content will be added here]"
+                        sections[section] = f"[{section} section to be added]"
 
             # Format according to template
             formatted_content = template['format'].format(**sections)
             
-            # Clean up any extra whitespace
+            # Clean up formatting
             formatted_content = '\n'.join(line.strip() for line in formatted_content.splitlines() if line.strip())
             
             return formatted_content
 
         except Exception as e:
             logger.error(f"Error in template application: {str(e)}")
-            return content  # Return original content on error 
+            # Don't return original content on error, return basic formatted version
+            return self._format_basic_template(content, template)
+
+    def _format_basic_template(self, content: str, template: dict) -> str:
+        """Fallback formatting when AI processing fails"""
+        sections = {}
+        content_parts = content.split('\n\n')
+        
+        # Basic content distribution
+        sections['title'] = content_parts[0] if content_parts else "Untitled Document"
+        remaining_parts = content_parts[1:] if len(content_parts) > 1 else []
+        
+        for i, section in enumerate(template['structure'][1:], 1):
+            if i < len(remaining_parts):
+                sections[section] = remaining_parts[i]
+            else:
+                sections[section] = f"[{section} section]"
+        
+        return template['format'].format(**sections) 
