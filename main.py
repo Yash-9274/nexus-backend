@@ -18,7 +18,10 @@ allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://nexus-one-navy.vercel.app"  # Add your Vercel domain
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
