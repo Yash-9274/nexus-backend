@@ -20,7 +20,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://nexus-one-navy.vercel.app"  # Add your Vercel domain
+        "https://nexus-one-navy.vercel.app",
+        "https://nexus-6vj6smxw1-yash9274s-projects.vercel.app"  # Add your new Vercel domain
     ],
     allow_credentials=True,
     allow_methods=["*"],

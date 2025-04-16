@@ -12,7 +12,11 @@ app = FastAPI(title=settings.PROJECT_NAME)
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000","https://nexus-one-navy.vercel.app/"],  # Your frontend URL
+    allow_origins=[
+        "http://localhost:3000",
+        "https://nexus-one-navy.vercel.app",
+        "https://nexus-6vj6smxw1-yash9274s-projects.vercel.app"  # Add your new Vercel domain
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

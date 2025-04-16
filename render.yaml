@@ -12,7 +12,7 @@ services:
       - key: SECRET_KEY
         generateValue: true
       - key: ALLOWED_ORIGINS
-        value: http://localhost:3000,https://your-app-name.vercel.app
+        value: http://localhost:3000,https://nexus-one-navy.vercel.app,https://nexus-6vj6smxw1-yash9274s-projects.vercel.app
 
 databases:
   - name: knowledge-db
